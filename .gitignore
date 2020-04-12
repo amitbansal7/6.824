@@ -1,3 +1,8 @@
 pkg/
 api.key
 *-handin.tar.gz
+mr-out*
+mr-reduce*
+.DS_Store
+mr-tmp
+*.so
