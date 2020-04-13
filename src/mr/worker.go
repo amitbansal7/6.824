@@ -5,11 +5,7 @@ import "log"
 import "net/rpc"
 import "os"
 import "hash/fnv"
-
 import "encoding/json"
-
-// import "sync"
-// import "math/rand"
 import "io/ioutil"
 import "strconv"
 import "time"
@@ -36,9 +32,7 @@ func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 type meta struct {
 	work    *Work
-	wChan   chan *Work
 	NReduce int
-	MapDone bool
 	AllDone bool
 	mapf    func(string, string) []KeyValue
 	reducef func(string, []string) string
@@ -59,32 +53,28 @@ func (m *meta) Sync() {
 
 		response := SyncResponse{}
 
-		if time.Now().After(m.work.Timeout) {
-			// fmt.Println("worker Timeout marking worker as idle")
-			m.work.Status = "idle"
-		}
-		if !call("Master.Sync", &m.work, &response) {
+		if !call("Master.Sync", m.work, &response) {
 			//s.Init(s.mapf,s.reducef)
 			fmt.Println("os.Exit(0) from worker")
 			os.Exit(0)
 		}
 
-		if response.NewWork != nil {
-			m.work = response.NewWork
-			m.wChan <- response.NewWork
-		}
-
-		m.AllDone = response.AllDone
-		m.MapDone = response.MapDone
 		m.NReduce = response.NReduce
 
-		if m.AllDone {
-			// fmt.Println("All Done!!!")
-			close(m.wChan)
+		if response.AllDone {
+			// fmt.Println("Worker Done!")
 			return
 		}
-
-		time.Sleep(time.Millisecond * 500)
+		if response.NewWork != nil {
+			m.work = response.NewWork
+			m.DoWork()
+			// fmt.Println("Done Task =>", m.work)
+		} else {
+			m.work = &Work{
+				Status: "idle",
+			}
+			time.Sleep(time.Millisecond * 100)
+		}
 	}
 }
 
@@ -214,9 +204,6 @@ func (m *meta) Reduce() {
 			}
 		}
 
-		// for _, kv := range kvs {
-		// 	fmt.Fprintf(f, "%v %v\n", kv.Key, kv.Value)
-		// }
 		task.TempToResFiles[tempFile] = out
 		f.Close()
 	}
@@ -224,22 +211,13 @@ func (m *meta) Reduce() {
 }
 
 func (m *meta) DoWork() {
-	for work := range m.wChan {
-		if t := work.Task; t != nil {
-			if t.Action == "map" {
-				m.Map()
-				m.work.Status = "done"
-			} else if t.Action == "reduce" {
-				if m.MapDone == false {
-					// fmt.Println("Reduce task received waiting for map to complete...")
-					time.Sleep(time.Millisecond * 300)
-					m.wChan <- work
-				} else {
-					m.Reduce()
-					m.work.Status = "done"
-				}
-			}
-
+	if t := m.work.Task; t != nil {
+		if t.Action == "map" {
+			m.Map()
+			m.work.Status = "done"
+		} else if t.Action == "reduce" {
+			m.Reduce()
+			m.work.Status = "done"
 		}
 	}
 }
@@ -250,18 +228,13 @@ func Worker(mapf func(string, string) []KeyValue,
 	m := meta{}
 
 	m.work = &Work{
-		Status:  "idle",
-		Timeout: time.Now(),
+		Status: "idle",
 	}
-
-	m.wChan = make(chan *Work, 2)
 
 	m.mapf = mapf
 	m.reducef = reducef
 
-	go m.Sync()
-
-	m.DoWork()
+	m.Sync()
 
 	// fmt.Println("Worker shutting down.....")
 }

@@ -43,7 +43,6 @@ type Task struct {
 type SyncResponse struct {
 	NewWork *Work
 	NReduce int
-	MapDone bool
 	AllDone bool
 }
 

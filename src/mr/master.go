@@ -7,18 +7,14 @@ import "net/rpc"
 import "time"
 import "net/http"
 import "encoding/json"
-
-// import "errors"
 import "sync"
 import "strconv"
 import "fmt"
 
-// import "io/ioutil"
-
 type Master struct {
 	activeWorks       map[string]*Work
-	mapTasks          []Task
-	reduceTasks       []Task
+	mapTasks          []*Task
+	reduceTasks       []*Task
 	mapActiveWorks    int
 	reduceActiveWorks int
 	nReduce           int
@@ -32,8 +28,8 @@ func (m *Master) Init(files []string, nReduce int) {
 	m.activeWorks = map[string]*Work{}
 	m.mapActiveWorks = 0
 	m.reduceActiveWorks = 0
-	m.mapTasks = []Task{}
-	m.reduceTasks = []Task{}
+	m.mapTasks = []*Task{}
+	m.reduceTasks = []*Task{}
 	m.nReduce = nReduce
 	m.started = true
 }
@@ -67,10 +63,10 @@ func (m *Master) CreateTasks(files []string) {
 
 //action = map or reduce
 func (m *Master) AddTasks(action string, files ...string) {
-	var tasks []Task
+	var tasks []*Task
 
 	for _, file := range files {
-		tasks = append(tasks, Task{
+		tasks = append(tasks, &Task{
 			Action:         action,
 			File:           file,
 			TempToResFiles: map[string]string{},
@@ -100,62 +96,64 @@ func (m *Master) RemoveActiveWork(work *Work) {
 
 func (m *Master) Checker() {
 	for {
+		m.mu.Lock()
 
 		// fmt.Println("Current Status: ",
-		// "activeWorks : ", len(m.activeWorks),
-		// "| mapTasks : ", len(m.mapTasks),
-		// "| reduceTasks : ", len(m.reduceTasks),
-		// "| mapActiveWorks : ", m.mapActiveWorks,
-		// "| reduceActiveWorks : ", m.reduceActiveWorks,
+		// 	"activeWorks : ", len(m.activeWorks),
+		// 	"| mapTasks : ", len(m.mapTasks),
+		// 	"| reduceTasks : ", len(m.reduceTasks),
+		// 	"| mapActiveWorks : ", m.mapActiveWorks,
+		// 	"| reduceActiveWorks : ", m.reduceActiveWorks,
 		// )
-
-		if m.allDone {
-			return
-		}
 		for _, w := range m.activeWorks {
 			if time.Now().After(w.Timeout) {
 				// fmt.Println("Work timeout... reassigning task")
-				m.mu.Lock()
 				m.RemoveActiveWork(w)
 				m.AddTasks(w.Task.Action, w.Task.File)
-				m.mu.Unlock()
-
 			}
 		}
+
+		m.allDone = m.mapActiveWorks == 0 && m.reduceActiveWorks == 0 && len(m.mapTasks) == 0 && len(m.reduceTasks) == 0 && m.started
+
+		if m.allDone {
+			m.mu.Unlock()
+			// fmt.Println("Checker Done!")
+			return
+		}
+
+		m.mu.Unlock()
 		time.Sleep(time.Millisecond * 100)
 	}
 }
 
-func (m *Master) CreateNewWork() (newWork *Work) {
+func (m *Master) CreateNewWork() *Work {
 	// m.mu.Lock()
 	// defer m.mu.Unlock()
 
 	var task *Task
 
 	if len(m.mapTasks) > 0 {
-		task = &m.mapTasks[0]
+		task = m.mapTasks[0]
 		m.mapTasks = m.mapTasks[1:]
 		m.mapActiveWorks += 1
-	} else if len(m.reduceTasks) > 0 {
-		task = &m.reduceTasks[0]
+	} else if len(m.mapTasks) == 0 && m.mapActiveWorks == 0 && len(m.reduceTasks) > 0 {
+		task = m.reduceTasks[0]
 		m.reduceTasks = m.reduceTasks[1:]
 		m.reduceActiveWorks += 1
 	}
 
-	var work Work
+	var work *Work
 
 	if task != nil {
-		work = Work{
-			Id:      fmt.Sprintf("%s - %s", task.File, task.Action),
+		work = &Work{
+			Id:      strconv.FormatInt(time.Now().UnixNano(), 10),
 			Status:  "working",
 			Timeout: time.Now().Add(time.Second * 10),
 			Task:    task,
 		}
-		newWork = &work
-		m.activeWorks[work.Id] = &work
+		m.activeWorks[work.Id] = work
 	}
-
-	return &work
+	return work
 }
 
 func (m *Master) UpdateFiles(task *Task) {
@@ -226,37 +224,35 @@ func (m *Master) UpdateFiles(task *Task) {
 func (m *Master) Sync(work *Work, response *SyncResponse) error {
 
 	// fmt.Println("Worker asking for Sync worker status: ", work.Status)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	switch work.Status {
 
 	case "idle":
-		m.mu.Lock()
-		m.RemoveActiveWork(work)
 		response.NewWork = m.CreateNewWork()
-		m.mu.Unlock()
 
 	case "done":
-		//If work is active and not removed by Checker due to timeout
 		if _, ok := m.activeWorks[work.Id]; ok {
 			// fmt.Println("Work Done!!", work.Task)
-			m.mu.Lock()
 			m.UpdateFiles(work.Task)
 			m.RemoveActiveWork(work)
 			response.NewWork = m.CreateNewWork()
-			m.mu.Unlock()
 		} else {
-			// fmt.Println("******Dead worker is alive again", work.Task)
+			fmt.Println("******Dead worker is alive again", work.Task)
 		}
 
-	case "working":
-		//do nothing..
+		// case "working":
+		// 	if _, ok := m.activeWorks[work.Id]; !ok {
+		// 		// fmt.Println("Work Done!!", work.Task)
+		// 		response.NewWork = m.CreateNewWork()
+		// 	}
 	}
 
-	response.MapDone = len(m.mapTasks) == 0 && m.mapActiveWorks == 0
-	response.AllDone = response.MapDone && len(m.reduceTasks) == 0 && m.reduceActiveWorks == 0
-	m.allDone = response.AllDone
-
+	m.allDone = m.mapActiveWorks == 0 && m.reduceActiveWorks == 0 && len(m.mapTasks) == 0 && len(m.reduceTasks) == 0 && m.started
+	response.AllDone = m.allDone
 	response.NReduce = m.nReduce
+
 	return nil
 }
 
@@ -275,11 +271,12 @@ func (m *Master) server() {
 
 func (m *Master) Done() bool {
 	ret := false
-	if m.mapActiveWorks == 0 && m.reduceActiveWorks == 0 && len(m.mapTasks) == 0 && len(m.reduceTasks) == 0 && m.started {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.allDone {
 		// fmt.Println("Master Done in", time.Now().Sub(startTime).Seconds(), "Seconds")
 		ret = true
 	}
-
 	return ret
 }
 
