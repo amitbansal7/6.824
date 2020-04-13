@@ -6,10 +6,10 @@ package mr
 // remember to capitalize all names.
 //
 
-import ( 
+import (
 	"os"
-	"time"
 	"strconv"
+	"time"
 )
 
 //
@@ -27,23 +27,24 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
-type Work struct{
-	Id					string
-	Status			string // "idle", "done", "working"
-	Timeout			time.Time
-	Task				*Task
+type Work struct {
+	Id      string
+	Status  string // "idle", "done", "working"
+	Timeout time.Time
+	Task    *Task
 }
 
-type Task struct{
-	Action 		string
-	File 			string
+type Task struct {
+	Action         string
+	File           string
+	TempToResFiles map[string]string
 }
 
-type SyncResponse struct{
-	NewWork 			*Work
-	NReduce				int
-	MapDone				bool
-	AllDone				bool
+type SyncResponse struct {
+	NewWork *Work
+	NReduce int
+	MapDone bool
+	AllDone bool
 }
 
 // Cook up a unique-ish UNIX-domain socket name

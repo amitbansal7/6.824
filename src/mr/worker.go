@@ -9,6 +9,7 @@ import "hash/fnv"
 import "encoding/json"
 
 // import "sync"
+// import "math/rand"
 import "io/ioutil"
 import "strconv"
 import "time"
@@ -29,6 +30,9 @@ type ByKey []KeyValue
 func (a ByKey) Len() int           { return len(a) }
 func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
+
+// var seededRand *rand.Rand = rand.New(
+// rand.NewSource(int(time.Now().UnixNano() / 1e6))
 
 type meta struct {
 	work    *Work
@@ -55,12 +59,15 @@ func (m *meta) Sync() {
 
 		response := SyncResponse{}
 
+		if time.Now().After(m.work.Timeout) {
+			// fmt.Println("worker Timeout marking worker as idle")
+			m.work.Status = "idle"
+		}
 		if !call("Master.Sync", &m.work, &response) {
 			//s.Init(s.mapf,s.reducef)
+			fmt.Println("os.Exit(0) from worker")
 			os.Exit(0)
 		}
-
-		// fmt.Println("Response => ", response)
 
 		if response.NewWork != nil {
 			m.work = response.NewWork
@@ -77,7 +84,7 @@ func (m *meta) Sync() {
 			return
 		}
 
-		time.Sleep(time.Millisecond * 1000)
+		time.Sleep(time.Millisecond * 500)
 	}
 }
 
@@ -105,19 +112,24 @@ func (m *meta) Map() {
 	fileToKvs = map[string][]KeyValue{}
 
 	for _, kv := range kvs {
-		out := "mr-reduce-in-" + strconv.Itoa(ihash(kv.Key)%m.NReduce+1)
+		outf := "mr-reduce-in-" + strconv.Itoa(ihash(kv.Key)%m.NReduce+1)
 
-		if _, ok := fileToKvs[out]; !ok {
-			fileToKvs[out] = []KeyValue{}
+		if _, ok := fileToKvs[outf]; !ok {
+			fileToKvs[outf] = []KeyValue{}
 		}
 
-		fileToKvs[out] = append(fileToKvs[out], kv)
+		fileToKvs[outf] = append(fileToKvs[outf], kv)
 	}
 
 	for out, kvs := range fileToKvs {
-		f, err := os.OpenFile(out, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		tempFile := strconv.FormatInt(time.Now().UnixNano(), 10)
+		if _, e := os.Create(tempFile); e != nil {
+			log.Printf("[Master] Create [%s] File Error", tempFile)
+		}
+		f, err := os.OpenFile(tempFile, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+
 		if err != nil {
-			fmt.Println("Cannot open file ", out)
+			fmt.Println("Cannot open file ", tempFile)
 		}
 		encoder := json.NewEncoder(f)
 		for _, kv := range kvs {
@@ -126,6 +138,9 @@ func (m *meta) Map() {
 				fmt.Println("enc error ", enc)
 			}
 		}
+
+		task.TempToResFiles[tempFile] = out
+
 		f.Close()
 	}
 }
@@ -133,7 +148,6 @@ func (m *meta) Map() {
 func (m *meta) Reduce() {
 	// fmt.Println("Reduce -> ", m.work.Task.File)
 	// defer fmt.Println("Reduce done -> ", m.work.Task.File)
-
 
 	task := m.work.Task
 	file, err := os.Open(task.File)
@@ -145,7 +159,7 @@ func (m *meta) Reduce() {
 	decoder := json.NewDecoder(file)
 	intermediate := []KeyValue{}
 
-	for{
+	for {
 		var kv KeyValue
 		if err := decoder.Decode(&kv); err != nil {
 			break
@@ -171,25 +185,39 @@ func (m *meta) Reduce() {
 		}
 		output := m.reducef(intermediate[i].Key, values)
 
-		out := "mr-out-" + strconv.Itoa(ihash(intermediate[i].Key)%m.NReduce+1)
+		outf := "mr-out-" + strconv.Itoa(ihash(intermediate[i].Key)%m.NReduce+1)
 
-		if _, ok := fileToKvs[out]; !ok {
-			fileToKvs[out] = []KeyValue{}
+		if _, ok := fileToKvs[outf]; !ok {
+			fileToKvs[outf] = []KeyValue{}
 		}
 
-		fileToKvs[out] = append(fileToKvs[out], KeyValue{Key: intermediate[i].Key,Value: output,})
+		fileToKvs[outf] = append(fileToKvs[outf], KeyValue{Key: intermediate[i].Key, Value: output})
 
 		i = j
 	}
 
 	for out, kvs := range fileToKvs {
-		f, err := os.OpenFile(out, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+		tempFile := strconv.FormatInt(time.Now().UnixNano(), 10)
+		if _, e := os.Create(tempFile); e != nil {
+			log.Printf("[Master] Create [%s] File Error", tempFile)
+		}
+		f, err := os.OpenFile(tempFile, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
 		if err != nil {
-			fmt.Println("Cannot open file ", out)
+			fmt.Println("Cannot open file ", tempFile)
 		}
+
+		encoder := json.NewEncoder(f)
 		for _, kv := range kvs {
-			fmt.Fprintf(f, "%v %v\n", kv.Key, kv.Value)
+			enc := encoder.Encode(&kv)
+			if enc != nil {
+				fmt.Println("enc error ", enc)
+			}
 		}
+
+		// for _, kv := range kvs {
+		// 	fmt.Fprintf(f, "%v %v\n", kv.Key, kv.Value)
+		// }
+		task.TempToResFiles[tempFile] = out
 		f.Close()
 	}
 
