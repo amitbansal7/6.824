@@ -19,6 +19,7 @@ type Master struct {
 	reduceActiveWorks int
 	nReduce           int
 	mu                sync.Mutex
+	doneCond          *sync.Cond
 	filesMu           sync.Mutex
 	started           bool
 	allDone           bool
@@ -32,6 +33,7 @@ func (m *Master) Init(files []string, nReduce int) {
 	m.reduceTasks = []*Task{}
 	m.nReduce = nReduce
 	m.started = true
+	m.doneCond = sync.NewCond(&m.mu)
 }
 
 var (
@@ -116,6 +118,7 @@ func (m *Master) Checker() {
 		m.allDone = m.mapActiveWorks == 0 && m.reduceActiveWorks == 0 && len(m.mapTasks) == 0 && len(m.reduceTasks) == 0 && m.started
 
 		if m.allDone {
+			m.doneCond.Broadcast()
 			m.mu.Unlock()
 			// fmt.Println("Checker Done!")
 			return
@@ -284,14 +287,12 @@ func (m *Master) server() {
 }
 
 func (m *Master) Done() bool {
-	ret := false
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.allDone {
-		// fmt.Println("Master Done in", time.Now().Sub(startTime).Seconds(), "Seconds")
-		ret = true
+	for !m.allDone {
+		m.doneCond.Wait()
 	}
-	return ret
+	return true
 }
 
 func MakeMaster(files []string, nReduce int) *Master {
