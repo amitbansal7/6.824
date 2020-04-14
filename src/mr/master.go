@@ -158,7 +158,6 @@ func (m *Master) CreateNewWork() *Work {
 
 func (m *Master) UpdateFiles(task *Task) {
 	m.filesMu.Lock()
-	defer m.filesMu.Unlock()
 	if task.Action == "map" {
 		for t, o := range task.TempToResFiles {
 			temp, err := os.Open(t)
@@ -185,10 +184,10 @@ func (m *Master) UpdateFiles(task *Task) {
 			}
 			temp.Close()
 			out.Close()
-			err = os.Remove(t)
-			if err != nil {
-				fmt.Println(err)
-			}
+			// err = os.Remove(t)
+			// if err != nil {
+			// 	fmt.Println(err)
+			// }
 		}
 	} else if task.Action == "reduce" {
 		for t, o := range task.TempToResFiles {
@@ -213,10 +212,23 @@ func (m *Master) UpdateFiles(task *Task) {
 			temp.Close()
 			out.Close()
 
-			err = os.Remove(t)
-			if err != nil {
-				fmt.Println(err)
-			}
+			// err = os.Remove(t)
+			// if err != nil {
+			// 	fmt.Println(err)
+			// }
+		}
+	}
+	m.filesMu.Unlock()
+	m.CleanWorkerFiles(task)
+}
+
+func (m *Master) CleanWorkerFiles(task *Task) {
+	m.filesMu.Lock()
+	defer m.filesMu.Unlock()
+	for t, _ := range task.TempToResFiles {
+		err := os.Remove(t)
+		if err != nil {
+			fmt.Println(err)
 		}
 	}
 }
@@ -240,6 +252,8 @@ func (m *Master) Sync(work *Work, response *SyncResponse) error {
 			response.NewWork = m.CreateNewWork()
 		} else {
 			fmt.Println("******Dead worker is alive again", work.Task)
+			go m.CleanWorkerFiles(work.Task)
+			response.NewWork = m.CreateNewWork()
 		}
 
 		// case "working":
