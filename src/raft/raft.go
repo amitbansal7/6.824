@@ -24,7 +24,6 @@ import "time"
 import crand "crypto/rand"
 import "math/big"
 
-// import "fmt"
 
 // import "bytes"
 // import "../labgob"
@@ -81,13 +80,10 @@ type Raft struct {
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
-	var term int
-	var isleader bool
-	// Your code here (2A).
-	term = rf.currentTerm
-	isleader = rf.currentState == LEADER
-	DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", term, isleader)
-	return term, isleader
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", rf.currentTerm, rf.currentState == LEADER)
+	return rf.currentTerm, rf.currentState == LEADER
 }
 
 func (rf *Raft) IncTerm() {
@@ -169,7 +165,7 @@ func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	term, _ := rf.GetState()
+	term := rf.currentTerm
 	DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
 
 	DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", term, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
@@ -297,6 +293,7 @@ func (rf *Raft) SendHeartBeats() {
 	for {
 		rf.mu.Lock()
 		if rf.killed() {
+			rf.mu.Unlock()
 			return
 		}
 		for rf.currentState != LEADER {
@@ -332,6 +329,10 @@ func (rf *Raft) SendHeartBeats() {
 
 func (rf *Raft) ConductElection() {
 	rf.mu.Lock()
+	if rf.killed() {
+		rf.mu.Unlock()
+		return
+	}
 	rf.IncTerm()
 	DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
 	rf.currentState = CANDIDATE
@@ -399,8 +400,12 @@ func (rf *Raft) ConductElection() {
 
 func (rf *Raft) StartElectionProcess() {
 	for {
-
 		rf.mu.Lock()
+
+		if rf.killed() {
+			rf.mu.Unlock()
+			return
+		}
 
 		if rf.currentState == CANDIDATE {
 			rf.mu.Unlock()
@@ -422,14 +427,16 @@ func (rf *Raft) StartElectionProcess() {
 //if communication is not received for LastRpcTimeOut calls for an election
 func (rf *Raft) CheckAndKickOfLeaderElection() {
 	for {
-		if rf.killed() {
-			return
-		}
 		max := big.NewInt(200)
 		rr, _ := crand.Int(crand.Reader, max)
 		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
 
 		rf.mu.Lock()
+		if rf.killed() {
+			rf.mu.Unlock()
+			return
+		}
+
 		timeOutAt := rf.lastRpcReceived.Add(LastRpcTimeOut)
 		if time.Now().After(timeOutAt) {
 			rf.currentState = CANDIDATE
