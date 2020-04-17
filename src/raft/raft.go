@@ -299,6 +299,9 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) SendHeartBeats() {
 	for {
 		rf.mu.Lock()
+		if rf.killed(){
+			return
+		}
 		for rf.currentState != LEADER {
 			rf.rfCond.Wait()
 		}
@@ -415,6 +418,9 @@ func (rf *Raft) StartElectionProcess() {
 //if communication is not received for LastRpcTimeOut calls for an election
 func (rf *Raft) CheckAndKickOfLeaderElection() {
 	for {
+		if rf.killed(){
+			return
+		}
 		max := big.NewInt(200)
 		rr, _ := crand.Int(crand.Reader, max)
 		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
