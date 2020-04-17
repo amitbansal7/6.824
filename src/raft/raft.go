@@ -23,13 +23,14 @@ import "../labrpc"
 import "time"
 import crand "crypto/rand"
 import "math/big"
-import "fmt"
+
+// import "fmt"
 
 // import "bytes"
 // import "../labgob"
 
 const (
-	LastRpcTimeOut = time.Millisecond * 300 // if no communication is received, calls for an election
+	LastRpcTimeOut = time.Millisecond * 350 // if no communication is received, calls for an election
 	FOLLOWER       = 0
 	LEADER         = 1
 	CANDIDATE      = 2
@@ -85,7 +86,7 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 	term = rf.currentTerm
 	isleader = rf.currentState == LEADER
-	// fmt.Println("GetState from" , rf.me, "=> ",term, isleader)
+	DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", term, isleader)
 	return term, isleader
 }
 
@@ -164,46 +165,50 @@ type RequestVoteReply struct {
 
 ///*************
 
-//
-// example RequestVote RPC handler.
-//
 func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	term, _ := rf.GetState()
-	fmt.Println("*********RequestVote received from", args.CandidateId, "by ", rf.me)
+	DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
 
-	fmt.Println("args.Term => ", args.Term, "term =>", term, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
+	DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", term, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
 
-	if args.Term <= term {
+	if args.Term < term {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
-	} else if rf.votedFor == -1 && args.LastLogIndex >= rf.commitIndex {
+		rf.votedFor = -1
+	} else if rf.votedFor == -1 || args.LastLogIndex >= rf.commitIndex {
 		reply.VoteGranted = true
-		// fmt.Println(rf.me, " Voting for ", args.CandidateId)
+		DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
 		// rf.currentTerm = args.Term
 		rf.votedFor = args.CandidateId
 		reply.Term = args.Term
 	}
-	fmt.Println("*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
+	DPrintln("[", rf.me, "]", "*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// fmt.Println("AppendEntries received from ", args.LeaderId, "by ", rf.me, "args.term => ", args.Term, "rf.currentTerm => ", rf.currentTerm)
-	if args.Term >= rf.currentTerm {
-		rf.lastRpcReceived = time.Now()
-		if args.LeaderId != rf.me {
-			rf.currentState = FOLLOWER
-		}
-		rf.votedFor = -1
-		// fmt.Println("Marking ", rf.me, "as a FOLLOWER")
+	DPrintln("[", rf.me, "]", "AppendEntries received from ", args.LeaderId, "by ", rf.me, "args.term => ", args.Term, "rf.currentTerm => ", rf.currentTerm)
+	rf.lastRpcReceived = time.Now()
+
+	if args.LeaderId != rf.me && args.Term >= rf.currentTerm {
+		rf.currentState = FOLLOWER
 		rf.currentTerm = args.Term
 		rf.rfCond.Broadcast()
 	}
+
+	DPrintln("[", rf.me, "]", "Marking ", rf.me, "as a FOLLOWER")
+
+	if args.LeaderId != rf.me && args.Term >= rf.currentTerm {
+		reply.Success = true
+	}
+	reply.Term = rf.currentTerm
+
+	DPrintln("[", rf.me, "]", "Receving HeartBeats from ")
 }
 
 //
@@ -235,9 +240,12 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 //
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply, repliesCount *int) bool {
 	// DPrintf("Sending RequestVote to %d", server)
 	ok := rf.peers[server].Call("Raft.RequestVoteRpc", args, reply)
+	if ok {
+		*repliesCount = *repliesCount + 1
+	}
 	return ok
 }
 
@@ -278,12 +286,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	fmt.Println("Kill called....")
+	DPrintln("[", rf.me, "]", "Kill called....")
 	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
-	fmt.Println("Killed called....")
+	DPrintln("[", rf.me, "]", "Killed called....")
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
@@ -291,13 +299,10 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) SendHeartBeats() {
 	for {
 		rf.mu.Lock()
-		// if rf.killed(){
-		// 	return
-		// }
 		for rf.currentState != LEADER {
 			rf.rfCond.Wait()
 		}
-		// fmt.Println(rf.me, "Sending HeartBeats")
+		DPrintln("[", rf.me, "]", "Sending HeartBeats for term =>", rf.currentTerm)
 		appendEntriesArgs := AppendEntriesArgs{
 			Term:     rf.currentTerm,
 			LeaderId: rf.me,
@@ -306,25 +311,29 @@ func (rf *Raft) SendHeartBeats() {
 			// Entries      []int
 			// LeaderCommit int
 		}
-		reply := AppendEntriesReply{}
-
 		for _, clientEnd := range rf.peers {
-			// if i != rf.me {
-			// DPrintf("%d Sending AppendEntries", rf.me)
-			go clientEnd.Call("Raft.AppendEntries", &appendEntriesArgs, &reply)
-			// }
+			reply := AppendEntriesReply{}
+			go func(clientEnd *labrpc.ClientEnd, args *AppendEntriesArgs, reply *AppendEntriesReply) {
+				clientEnd.Call("Raft.AppendEntries", args, reply)
+				rf.mu.Lock()
+				if reply.Term > rf.currentTerm {
+					rf.currentTerm = reply.Term
+					rf.currentState = FOLLOWER
+				}
+				rf.mu.Unlock()
+
+			}(clientEnd, &appendEntriesArgs, &reply)
 		}
 
 		rf.mu.Unlock()
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 	}
 }
 
 func (rf *Raft) ConductElection() {
-	// DPrintf("%d conductin election", me)
 	rf.mu.Lock()
-	DPrintf("Election started by %d", rf.me)
 	rf.IncTerm()
+	DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
 	rf.currentState = CANDIDATE
 	rf.votedFor = rf.me
 
@@ -334,6 +343,7 @@ func (rf *Raft) ConductElection() {
 	}
 
 	requestVoteReplyMp := make(map[int]*RequestVoteReply)
+
 	requestVoteReplyMp[rf.me] = &RequestVoteReply{
 		Term:        rf.currentTerm,
 		VoteGranted: true,
@@ -341,32 +351,27 @@ func (rf *Raft) ConductElection() {
 	var repliesCount int
 	repliesCount = 0
 	for i, _ := range rf.peers {
-		reply := &RequestVoteReply{}
-		requestVoteReplyMp[i] = reply
-
-		go func(repliesCount *int, peerId int) {
-			if peerId != rf.me && rf.sendRequestVote(peerId, requestVoteArgs, reply) {
-				*repliesCount = (*repliesCount) + 1
-			}
-		}(&repliesCount, i)
+		if i != rf.me {
+			reply := &RequestVoteReply{}
+			requestVoteReplyMp[i] = reply
+			go rf.sendRequestVote(i, requestVoteArgs, reply, &repliesCount)
+		}
 	}
 
 	rf.mu.Unlock()
 	//Wait for votes
-	time.Sleep(time.Millisecond * 170)
+	time.Sleep(time.Millisecond * 60)
 	rf.mu.Lock()
-	fmt.Println("Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
-	// fmt.Println(requestVoteReplyMp)
-	if repliesCount > (len(rf.peers) / 2) {
+	DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
+	if repliesCount >= (len(rf.peers) / 2) {
 		votes := 0
 		for i, reply := range requestVoteReplyMp {
-			fmt.Println("Reply from ", i, reply)
-			if i == rf.me {
-				continue
-			}
+			DPrintln("[", rf.me, "]", "Reply from ", i, reply)
+
 			if reply.Term > rf.currentTerm {
 				rf.currentState = FOLLOWER
 				rf.currentTerm = reply.Term
+				rf.votedFor = -1
 				rf.rfCond.Broadcast()
 				rf.mu.Unlock()
 				return
@@ -376,10 +381,9 @@ func (rf *Raft) ConductElection() {
 				}
 			}
 		}
-		DPrintf("%d VoteGranted received by %d", votes, rf.me)
 		if votes > (len(rf.peers) / 2) {
 			rf.currentState = LEADER
-			fmt.Println("LEADER is here....", rf.me)
+			DPrintln("[", rf.me, "]", "LEADER is here....", rf.me)
 			rf.rfCond.Broadcast()
 		}
 	}
@@ -389,18 +393,20 @@ func (rf *Raft) ConductElection() {
 func (rf *Raft) StartElectionProcess() {
 	for {
 
-		if rf.currentState != CANDIDATE {
-			rf.ConductElection()
-		}
 		rf.mu.Lock()
-		if rf.currentState != CANDIDATE {
+
+		if rf.currentState == CANDIDATE {
+			rf.mu.Unlock()
+			rf.ConductElection()
+		} else {
+			rf.votedFor = -1
 			rf.mu.Unlock()
 			return
 		}
-		rf.mu.Unlock()
 
-		max := big.NewInt(500)
+		max := big.NewInt(1000)
 		rr, _ := crand.Int(crand.Reader, max)
+		DPrintln("[", rf.me, "]", "Election paused for ", rr.Int64())
 		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
 
 	}
@@ -409,24 +415,19 @@ func (rf *Raft) StartElectionProcess() {
 //if communication is not received for LastRpcTimeOut calls for an election
 func (rf *Raft) CheckAndKickOfLeaderElection() {
 	for {
-		max := big.NewInt(400)
+		max := big.NewInt(200)
 		rr, _ := crand.Int(crand.Reader, max)
 		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
 
 		rf.mu.Lock()
 		timeOutAt := rf.lastRpcReceived.Add(LastRpcTimeOut)
 		if time.Now().After(timeOutAt) {
-
+			rf.currentState = CANDIDATE
 			go rf.StartElectionProcess()
 
 			rf.mu.Unlock()
 			// let the election happen
-			time.Sleep(3000 * time.Millisecond)
-			rf.mu.Lock()
-			for rf.currentState == CANDIDATE {
-				rf.rfCond.Wait()
-			}
-			rf.mu.Unlock()
+			time.Sleep(2000 * time.Millisecond)
 
 		} else {
 			rf.mu.Unlock()
@@ -460,17 +461,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentState = FOLLOWER
 	rf.rfCond = sync.NewCond(&rf.mu)
 
-	// max := big.NewInt(150)
-	// rr, _ := crand.Int(crand.Reader, max)
-	// time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
-	// Your initialization code here (2A, 2B, 2C).
-
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
-	// if(me == 0){
 	go rf.CheckAndKickOfLeaderElection()
-	// }
 	go rf.SendHeartBeats()
 
 	return rf
