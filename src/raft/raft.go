@@ -240,12 +240,9 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // that the caller passes the address of the reply struct with &, not
 // the struct itself.
 //
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply, repliesCount *int) bool {
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	// DPrintf("Sending RequestVote to %d", server)
 	ok := rf.peers[server].Call("Raft.RequestVoteRpc", args, reply)
-	if ok {
-		*repliesCount = *repliesCount + 1
-	}
 	return ok
 }
 
@@ -299,7 +296,7 @@ func (rf *Raft) killed() bool {
 func (rf *Raft) SendHeartBeats() {
 	for {
 		rf.mu.Lock()
-		if rf.killed(){
+		if rf.killed() {
 			return
 		}
 		for rf.currentState != LEADER {
@@ -357,7 +354,14 @@ func (rf *Raft) ConductElection() {
 		if i != rf.me {
 			reply := &RequestVoteReply{}
 			requestVoteReplyMp[i] = reply
-			go rf.sendRequestVote(i, requestVoteArgs, reply, &repliesCount)
+			go func(i int, args *RequestVoteArgs, reply *RequestVoteReply, repliesCount *int) {
+				ok := rf.sendRequestVote(i, requestVoteArgs, reply)
+				rf.mu.Lock()
+				if ok {
+					*repliesCount = *repliesCount + 1
+				}
+				rf.mu.Unlock()
+			}(i, requestVoteArgs, reply, &repliesCount)
 		}
 	}
 
@@ -418,7 +422,7 @@ func (rf *Raft) StartElectionProcess() {
 //if communication is not received for LastRpcTimeOut calls for an election
 func (rf *Raft) CheckAndKickOfLeaderElection() {
 	for {
-		if rf.killed(){
+		if rf.killed() {
 			return
 		}
 		max := big.NewInt(200)
