@@ -55,6 +55,7 @@ func (rf *Raft) ConductElection() {
 		rf.mu.Unlock()
 		return
 	}
+	rf.ResetRpcTimer()
 	rf.IncTerm()
 	DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
 	rf.currentState = CANDIDATE
@@ -90,7 +91,7 @@ func (rf *Raft) ConductElection() {
 
 	rf.mu.Unlock()
 	//Wait for votes
-	time.Sleep(time.Millisecond * 60)
+	time.Sleep(time.Millisecond * 20)
 	rf.mu.Lock()
 	DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
 	if repliesCount >= (len(rf.peers) / 2) {
@@ -138,10 +139,10 @@ func (rf *Raft) StartElectionProcess() {
 			return
 		}
 
-		max := big.NewInt(1000)
+		max := big.NewInt(400)
 		rr, _ := crand.Int(crand.Reader, max)
 		DPrintln("[", rf.me, "]", "Election paused for ", rr.Int64())
-		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
+		time.Sleep((200 + time.Duration(rr.Int64())) * time.Millisecond)
 
 	}
 }
@@ -166,7 +167,7 @@ func (rf *Raft) CheckAndKickOfLeaderElection() {
 
 			rf.mu.Unlock()
 			// let the election happen
-			time.Sleep(2000 * time.Millisecond)
+			time.Sleep(1000 * time.Millisecond)
 
 		} else {
 			rf.mu.Unlock()

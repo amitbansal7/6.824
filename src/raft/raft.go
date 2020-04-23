@@ -29,7 +29,7 @@ import "time"
 // import "../labgob"
 
 const (
-	LastRpcTimeOut = time.Millisecond * 350 // if no communication is received, calls for an election
+	LastRpcTimeOut = time.Millisecond * 300 // if no communication is received, calls for an election
 	FOLLOWER       = 0
 	LEADER         = 1
 	CANDIDATE      = 2
@@ -52,28 +52,31 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
-//
-// A Go object implementing a single Raft peer.
-//
+type Log struct {
+	Command interface{}
+	Term    int
+}
+
 type Raft struct {
-	mu              sync.Mutex          // Lock to protect shared access to this peer's state
-	peers           []*labrpc.ClientEnd // RPC end points of all peers
-	persister       *Persister          // Object to hold this peer's persisted state
-	me              int                 // this peer's index into peers[]
-	dead            int32               // set by Kill()
-	currentTerm     int
-	votedFor        int
-	commitIndex     int
-	lastApplied     int
-	nextIndex       []int
-	matchIndex      []int
+	mu        sync.Mutex          // Lock to protect shared access to this peer's state
+	peers     []*labrpc.ClientEnd // RPC end points of all peers
+	persister *Persister          // Object to hold this peer's persisted state
+	me        int                 // this peer's index into peers[]
+	dead      int32               // set by Kill()
+
+	currentTerm int
+	votedFor    int
+	log         []Log
+	commitIndex int
+	lastApplied int
+
+	//Volatile state
+	nextIndex  []int
+	matchIndex []int
+
 	lastRpcReceived time.Time
 	currentState    int
 	rfCond          *sync.Cond
-	// Your data here (2A, 2B, 2C).
-	// Look at the paper's Figure 2 for a description of what
-	// state a Raft server must maintain.
-
 }
 
 // return currentTerm and whether this server
@@ -136,7 +139,7 @@ type AppendEntriesArgs struct {
 	LeaderId     int
 	PreLogIndex  int
 	PrevLogTerm  int
-	Entries      []int
+	Entries      []Log
 	LeaderCommit int
 }
 
@@ -161,25 +164,34 @@ type RequestVoteReply struct {
 
 ///*************
 
+func (rf *Raft) ResetRpcTimer() {
+	rf.lastRpcReceived = time.Now()
+}
+
 func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	term := rf.currentTerm
 	DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
 
-	DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", term, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
+	DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", rf.currentTerm, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
 
-	if args.Term < term {
+	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		rf.votedFor = -1
-	} else if rf.votedFor == -1 || args.LastLogIndex >= rf.commitIndex {
+	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && args.LastLogIndex >= rf.commitIndex {
 		reply.VoteGranted = true
-		DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
-		// rf.currentTerm = args.Term
+		rf.ResetRpcTimer()
 		rf.votedFor = args.CandidateId
 		reply.Term = args.Term
+		DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
+	}else{
+		if args.Term > rf.currentTerm {
+			rf.ResetRpcTimer()
+			rf.currentTerm = args.Term
+			rf.votedFor = -1
+		}
 	}
 	DPrintln("[", rf.me, "]", "*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
 }
@@ -189,12 +201,15 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	defer rf.mu.Unlock()
 
 	DPrintln("[", rf.me, "]", "AppendEntries received from ", args.LeaderId, "by ", rf.me, "args.term => ", args.Term, "rf.currentTerm => ", rf.currentTerm)
-	rf.lastRpcReceived = time.Now()
 
 	if args.LeaderId != rf.me && args.Term >= rf.currentTerm {
 		rf.currentState = FOLLOWER
 		rf.currentTerm = args.Term
 		rf.rfCond.Broadcast()
+	}
+
+	if args.Term >= rf.currentTerm {
+		rf.ResetRpcTimer()
 	}
 
 	DPrintln("[", rf.me, "]", "Marking ", rf.me, "as a FOLLOWER")
@@ -264,7 +279,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.votedFor = -1
 	rf.commitIndex = 0
 	rf.lastApplied = 0
-	rf.lastRpcReceived = time.Now()
+	rf.ResetRpcTimer()
 	rf.currentState = FOLLOWER
 	rf.rfCond = sync.NewCond(&rf.mu)
 
