@@ -29,7 +29,7 @@ import "time"
 // import "../labgob"
 
 const (
-	LastRpcTimeOut = time.Millisecond * 300 // if no communication is received, calls for an election
+	LastRpcTimeOut = time.Millisecond * 400 // if no communication is received, calls for an election
 	FOLLOWER       = 0
 	LEADER         = 1
 	CANDIDATE      = 2
@@ -55,6 +55,7 @@ type ApplyMsg struct {
 type Log struct {
 	Command interface{}
 	Term    int
+	Index   int
 }
 
 type Raft struct {
@@ -69,6 +70,7 @@ type Raft struct {
 	log         []Log
 	commitIndex int
 	lastApplied int
+	applyCh     chan ApplyMsg
 
 	//Volatile state
 	nextIndex  []int
@@ -85,7 +87,7 @@ func (rf *Raft) GetState() (int, bool) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", rf.currentTerm, rf.currentState == LEADER)
+	// DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", rf.currentTerm, rf.currentState == LEADER)
 	return rf.currentTerm, rf.currentState == LEADER
 }
 
@@ -137,7 +139,7 @@ func (rf *Raft) readPersist(data []byte) {
 type AppendEntriesArgs struct {
 	Term         int
 	LeaderId     int
-	PreLogIndex  int
+	PrevLogIndex int
 	PrevLogTerm  int
 	Entries      []Log
 	LeaderCommit int
@@ -168,58 +170,8 @@ func (rf *Raft) ResetRpcTimer() {
 	rf.lastRpcReceived = time.Now()
 }
 
-func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-	DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
-
-	DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", rf.currentTerm, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
-
-	if args.Term < rf.currentTerm {
-		reply.VoteGranted = false
-		reply.Term = rf.currentTerm
-		rf.votedFor = -1
-	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && args.LastLogIndex >= rf.commitIndex {
-		reply.VoteGranted = true
-		rf.ResetRpcTimer()
-		rf.votedFor = args.CandidateId
-		reply.Term = args.Term
-		DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
-	}else{
-		if args.Term > rf.currentTerm {
-			rf.ResetRpcTimer()
-			rf.currentTerm = args.Term
-			rf.votedFor = -1
-		}
-	}
-	DPrintln("[", rf.me, "]", "*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
-}
-
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
-
-	DPrintln("[", rf.me, "]", "AppendEntries received from ", args.LeaderId, "by ", rf.me, "args.term => ", args.Term, "rf.currentTerm => ", rf.currentTerm)
-
-	if args.LeaderId != rf.me && args.Term >= rf.currentTerm {
-		rf.currentState = FOLLOWER
-		rf.currentTerm = args.Term
-		rf.rfCond.Broadcast()
-	}
-
-	if args.Term >= rf.currentTerm {
-		rf.ResetRpcTimer()
-	}
-
-	DPrintln("[", rf.me, "]", "Marking ", rf.me, "as a FOLLOWER")
-
-	if args.LeaderId != rf.me && args.Term >= rf.currentTerm {
-		reply.Success = true
-	}
-	reply.Term = rf.currentTerm
-
-	DPrintln("[", rf.me, "]", "Receving HeartBeats from ")
+func (rf *Raft) Majority() int {
+	return len(rf.peers) / 2
 }
 
 //
@@ -237,23 +189,40 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	DPrintln("[", rf.me, "]", "Start called with", command)
 	index := -1
 	term := -1
-	isLeader := true
+	isLeader := rf.currentState == LEADER
 
-	// Your code here (2B).
+	if !isLeader {
+		return index, term, isLeader
+	}
 
-	return index, term, isLeader
+	log := Log{
+		Command: command,
+		Term:    rf.currentTerm,
+		Index:   len(rf.log) + 1,
+	}
+
+	rf.log = append(rf.log, log)
+
+	entries := []Log{log}
+
+	go rf.SendAppendEntries(entries)
+
+	return log.Index, log.Term, isLeader
 }
 
 func (rf *Raft) Kill() {
 	atomic.StoreInt32(&rf.dead, 1)
-	DPrintln("[", rf.me, "]", "Kill called....")
+	// DPrintln("[", rf.me, "]", "Kill called....")
 	// Your code here, if desired.
 }
 
 func (rf *Raft) killed() bool {
-	DPrintln("[", rf.me, "]", "Killed called....")
+	// DPrintln("[", rf.me, "]", "Killed called....")
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
@@ -277,11 +246,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.currentTerm = 0
 	rf.votedFor = -1
+	rf.log = []Log{Log{Term: 1}}
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.ResetRpcTimer()
-	rf.currentState = FOLLOWER
+	rf.MakeFollower()
 	rf.rfCond = sync.NewCond(&rf.mu)
+	rf.applyCh = applyCh
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

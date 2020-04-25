@@ -1,6 +1,6 @@
 package raft
 
-import "../labrpc"
+// import "../labrpc"
 import "time"
 import crand "crypto/rand"
 import "math/big"
@@ -11,41 +11,48 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
-func (rf *Raft) SendHeartBeats() {
-	for {
-		rf.mu.Lock()
-		if rf.killed() {
-			rf.mu.Unlock()
-			return
-		}
-		for rf.currentState != LEADER {
-			rf.rfCond.Wait()
-		}
-		DPrintln("[", rf.me, "]", "Sending HeartBeats for term =>", rf.currentTerm)
-		appendEntriesArgs := AppendEntriesArgs{
-			Term:     rf.currentTerm,
-			LeaderId: rf.me,
-			// PreLogIndex  int
-			// PrevLogTerm  int
-			// Entries      []int
-			// LeaderCommit int
-		}
-		for _, clientEnd := range rf.peers {
-			reply := AppendEntriesReply{}
-			go func(clientEnd *labrpc.ClientEnd, args *AppendEntriesArgs, reply *AppendEntriesReply) {
-				clientEnd.Call("Raft.AppendEntries", args, reply)
-				rf.mu.Lock()
-				if reply.Term > rf.currentTerm {
-					rf.currentTerm = reply.Term
-					rf.currentState = FOLLOWER
-				}
-				rf.mu.Unlock()
+func (rf *Raft) MakeFollower() {
+	rf.currentState = FOLLOWER
+}
 
-			}(clientEnd, &appendEntriesArgs, &reply)
-		}
+func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
+	// Your code here (2A, 2B).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	// DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
 
-		rf.mu.Unlock()
-		time.Sleep(250 * time.Millisecond)
+	// DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", rf.currentTerm, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
+
+	if args.Term < rf.currentTerm {
+		reply.VoteGranted = false
+		reply.Term = rf.currentTerm
+		rf.votedFor = -1
+	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && args.LastLogIndex >= rf.commitIndex {
+		reply.VoteGranted = true
+		rf.ResetRpcTimer()
+		rf.votedFor = args.CandidateId
+		reply.Term = args.Term
+		// DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
+	} else {
+		if args.Term > rf.currentTerm {
+			rf.ResetRpcTimer()
+			rf.currentTerm = args.Term
+			rf.votedFor = -1
+		}
+	}
+	// DPrintln("[", rf.me, "]", "*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
+}
+
+func (rf *Raft) MakeLeader() {
+	rf.currentState = LEADER
+	rf.nextIndex = make([]int, len(rf.peers), len(rf.peers))
+	rf.matchIndex = make([]int, len(rf.peers), len(rf.peers))
+
+	nextLogIdx := len(rf.log) + 1
+
+	for i, _ := range rf.peers {
+		rf.nextIndex[i] = nextLogIdx
+		//TODO matchIndex
 	}
 }
 
@@ -57,13 +64,18 @@ func (rf *Raft) ConductElection() {
 	}
 	rf.ResetRpcTimer()
 	rf.IncTerm()
-	DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
+	// DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
 	rf.currentState = CANDIDATE
 	rf.votedFor = rf.me
 
+	lastLogTerm := rf.log[len(rf.log)-1].Term
+	lastLogIndex := len(rf.log) - 1
+
 	requestVoteArgs := &RequestVoteArgs{
-		Term:        rf.currentTerm,
-		CandidateId: rf.me,
+		Term:         rf.currentTerm,
+		CandidateId:  rf.me,
+		LastLogIndex: lastLogIndex,
+		LastLogTerm:  lastLogTerm,
 	}
 
 	requestVoteReplyMp := make(map[int]*RequestVoteReply)
@@ -93,14 +105,14 @@ func (rf *Raft) ConductElection() {
 	//Wait for votes
 	time.Sleep(time.Millisecond * 20)
 	rf.mu.Lock()
-	DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
-	if repliesCount >= (len(rf.peers) / 2) {
+	// DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
+	if repliesCount >= rf.Majority() {
 		votes := 0
-		for i, reply := range requestVoteReplyMp {
-			DPrintln("[", rf.me, "]", "Reply from ", i, reply)
+		for _, reply := range requestVoteReplyMp {
+			// DPrintln("[", rf.me, "]", "Reply from ", i, reply)
 
 			if reply.Term > rf.currentTerm {
-				rf.currentState = FOLLOWER
+				rf.MakeLeader()
 				rf.currentTerm = reply.Term
 				rf.votedFor = -1
 				rf.rfCond.Broadcast()
@@ -112,9 +124,9 @@ func (rf *Raft) ConductElection() {
 				}
 			}
 		}
-		if votes > (len(rf.peers) / 2) {
-			rf.currentState = LEADER
-			DPrintln("[", rf.me, "]", "LEADER is here....", rf.me)
+		if votes > rf.Majority() {
+			rf.MakeLeader()
+			// DPrintln("[", rf.me, "]", "LEADER is here....", rf.me)
 			rf.rfCond.Broadcast()
 		}
 	}
@@ -141,7 +153,7 @@ func (rf *Raft) StartElectionProcess() {
 
 		max := big.NewInt(400)
 		rr, _ := crand.Int(crand.Reader, max)
-		DPrintln("[", rf.me, "]", "Election paused for ", rr.Int64())
+		// DPrintln("[", rf.me, "]", "Election paused for ", rr.Int64())
 		time.Sleep((200 + time.Duration(rr.Int64())) * time.Millisecond)
 
 	}
