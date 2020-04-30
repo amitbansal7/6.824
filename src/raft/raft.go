@@ -21,6 +21,7 @@ import "sync"
 import "sync/atomic"
 import "../labrpc"
 import "time"
+// import "fmt"
 
 // import crand "crypto/rand"
 // import "math/big"
@@ -29,7 +30,6 @@ import "time"
 // import "../labgob"
 
 const (
-	LastRpcTimeOut = time.Millisecond * 400 // if no communication is received, calls for an election
 	FOLLOWER       = 0
 	LEADER         = 1
 	CANDIDATE      = 2
@@ -148,6 +148,7 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term    int
 	Success bool
+	NextIndex int
 }
 
 type RequestVoteArgs struct {
@@ -174,6 +175,10 @@ func (rf *Raft) Majority() int {
 	return len(rf.peers) / 2
 }
 
+func (rf *Raft) LastLog() Log {
+	return rf.log[len(rf.log)-1]
+}
+
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -191,7 +196,6 @@ func (rf *Raft) Majority() int {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	DPrintln("[", rf.me, "]", "Start called with", command)
 	index := -1
 	term := -1
 	isLeader := rf.currentState == LEADER
@@ -203,14 +207,16 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	log := Log{
 		Command: command,
 		Term:    rf.currentTerm,
-		Index:   len(rf.log) + 1,
+		Index:   rf.LastLog().Index + 1,
 	}
-
-	rf.log = append(rf.log, log)
 
 	entries := []Log{log}
 
-	go rf.SendAppendEntries(entries)
+	lastLog := rf.LastLog()
+	rf.log = append(rf.log, entries...)
+
+	// fmt.Println("[", rf.me, "]", "Start called with =>", entries)
+	go rf.SendAppendEntries(entries, lastLog)
 
 	return log.Index, log.Term, isLeader
 }
@@ -246,7 +252,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.currentTerm = 0
 	rf.votedFor = -1
-	rf.log = []Log{Log{Term: 1}}
+	rf.log = []Log{Log{Term: 0, Index: 0}}
 	rf.commitIndex = 0
 	rf.lastApplied = 0
 	rf.ResetRpcTimer()
@@ -259,6 +265,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	go rf.CheckAndKickOfLeaderElection()
 	go rf.SendHeartBeats()
+	go rf.Applier()
 
 	return rf
 }

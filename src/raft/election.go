@@ -5,9 +5,17 @@ import "time"
 import crand "crypto/rand"
 import "math/big"
 
-func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
+// import "fmt"
+
+func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply, replyMap map[int]*RequestVoteReply) bool {
 	// DPrintf("Sending RequestVote to %d", server)
-	ok := rf.peers[server].Call("Raft.RequestVoteRpc", args, reply)
+	rf.mu.Lock()
+	peer := rf.peers[server]
+	rf.mu.Unlock()
+	ok := peer.Call("Raft.RequestVoteRpc", args, reply)
+	rf.mu.Lock()
+	replyMap[server] = reply
+	rf.mu.Unlock()
 	return ok
 }
 
@@ -15,8 +23,21 @@ func (rf *Raft) MakeFollower() {
 	rf.currentState = FOLLOWER
 }
 
+//5.4.1 Election restriction check.
+func (rf *Raft) CandidateIsUptoDate(args *RequestVoteArgs) bool {
+	lastLog := rf.LastLog()
+
+	// DPrintln("[", rf.me, "]", args.LastLogTerm, lastLog.Term, args.LastLogIndex, len(rf.log)-1)
+
+	if args.LastLogTerm != lastLog.Term {
+		return args.LastLogTerm > lastLog.Term
+	} else {
+		//TODO make sure this is correct.
+		return args.LastLogIndex+1 >= len(rf.log)
+	}
+}
+
 func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
-	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
@@ -27,15 +48,17 @@ func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 		reply.VoteGranted = false
 		reply.Term = rf.currentTerm
 		rf.votedFor = -1
-	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && args.LastLogIndex >= rf.commitIndex {
+	} else if (rf.votedFor == -1 || rf.votedFor == args.CandidateId) && rf.CandidateIsUptoDate(args) {
 		reply.VoteGranted = true
 		rf.ResetRpcTimer()
+		rf.MakeFollower()
 		rf.votedFor = args.CandidateId
-		reply.Term = args.Term
+		reply.Term = rf.currentTerm
 		// DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
 	} else {
 		if args.Term > rf.currentTerm {
 			rf.ResetRpcTimer()
+			rf.MakeFollower()
 			rf.currentTerm = args.Term
 			rf.votedFor = -1
 		}
@@ -48,11 +71,11 @@ func (rf *Raft) MakeLeader() {
 	rf.nextIndex = make([]int, len(rf.peers), len(rf.peers))
 	rf.matchIndex = make([]int, len(rf.peers), len(rf.peers))
 
-	nextLogIdx := len(rf.log) + 1
+	nextLogIdx := len(rf.log)
 
 	for i, _ := range rf.peers {
 		rf.nextIndex[i] = nextLogIdx
-		//TODO matchIndex
+		rf.matchIndex[i] = 0
 	}
 }
 
@@ -68,69 +91,81 @@ func (rf *Raft) ConductElection() {
 	rf.currentState = CANDIDATE
 	rf.votedFor = rf.me
 
-	lastLogTerm := rf.log[len(rf.log)-1].Term
-	lastLogIndex := len(rf.log) - 1
-
-	requestVoteArgs := &RequestVoteArgs{
-		Term:         rf.currentTerm,
-		CandidateId:  rf.me,
-		LastLogIndex: lastLogIndex,
-		LastLogTerm:  lastLogTerm,
-	}
-
 	requestVoteReplyMp := make(map[int]*RequestVoteReply)
 
 	requestVoteReplyMp[rf.me] = &RequestVoteReply{
 		Term:        rf.currentTerm,
 		VoteGranted: true,
 	}
-	var repliesCount int
-	repliesCount = 0
+	//Voted for itself.
+	repliesCount := 1
+
 	for i, _ := range rf.peers {
 		if i != rf.me {
 			reply := &RequestVoteReply{}
-			requestVoteReplyMp[i] = reply
-			go func(i int, args *RequestVoteArgs, reply *RequestVoteReply, repliesCount *int) {
-				ok := rf.sendRequestVote(i, requestVoteArgs, reply)
+			// requestVoteReplyMp[i] = reply
+			requestVoteArgs := &RequestVoteArgs{
+				Term:         rf.currentTerm,
+				CandidateId:  rf.me,
+				LastLogIndex: len(rf.log) - 1,
+				LastLogTerm:  rf.LastLog().Term,
+			}
+			go func(i int, args *RequestVoteArgs, reply *RequestVoteReply, repliesCount *int, requestVoteReplyMp map[int]*RequestVoteReply) {
+				ok := rf.sendRequestVote(i, requestVoteArgs, reply, requestVoteReplyMp)
 				rf.mu.Lock()
 				if ok {
 					*repliesCount = *repliesCount + 1
 				}
 				rf.mu.Unlock()
-			}(i, requestVoteArgs, reply, &repliesCount)
+			}(i, requestVoteArgs, reply, &repliesCount, requestVoteReplyMp)
 		}
 	}
 
 	rf.mu.Unlock()
-	//Wait for votes
-	time.Sleep(time.Millisecond * 20)
-	rf.mu.Lock()
 	// DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
-	if repliesCount >= rf.Majority() {
-		votes := 0
-		for _, reply := range requestVoteReplyMp {
-			// DPrintln("[", rf.me, "]", "Reply from ", i, reply)
+	sleeps := 0
+	for {
+		if sleeps > 20 {
+			return
+		}
+		rf.mu.Lock()
+		if rf.currentState != CANDIDATE {
+			rf.mu.Unlock()
+			return
+		}
+		if repliesCount < rf.Majority() {
+			rf.mu.Unlock()
+			time.Sleep(time.Millisecond * 10)
+			sleeps += 1
+			continue
+		}
 
-			if reply.Term > rf.currentTerm {
-				rf.MakeLeader()
-				rf.currentTerm = reply.Term
-				rf.votedFor = -1
-				rf.rfCond.Broadcast()
-				rf.mu.Unlock()
-				return
-			} else {
-				if reply.VoteGranted {
-					votes += 1
+		if repliesCount >= rf.Majority() {
+			votes := 0
+			for _, reply := range requestVoteReplyMp {
+				// DPrintln("[", rf.me, "]", "Reply from ", i, reply)
+
+				if reply.Term > rf.currentTerm {
+					rf.MakeFollower()
+					rf.currentTerm = reply.Term
+					rf.votedFor = -1
+					rf.rfCond.Broadcast()
+					rf.mu.Unlock()
+					return
+				} else {
+					if reply.VoteGranted {
+						votes += 1
+					}
 				}
 			}
+			if votes > rf.Majority() {
+				rf.MakeLeader()
+				// fmt.Println("[", rf.me, ",", rf.currentTerm, "]", "LEADER is here....", rf.me)
+				rf.rfCond.Broadcast()
+			}
 		}
-		if votes > rf.Majority() {
-			rf.MakeLeader()
-			// DPrintln("[", rf.me, "]", "LEADER is here....", rf.me)
-			rf.rfCond.Broadcast()
-		}
+		rf.mu.Unlock()
 	}
-	rf.mu.Unlock()
 }
 
 func (rf *Raft) StartElectionProcess() {
@@ -150,21 +185,20 @@ func (rf *Raft) StartElectionProcess() {
 			rf.mu.Unlock()
 			return
 		}
-
-		max := big.NewInt(400)
-		rr, _ := crand.Int(crand.Reader, max)
-		// DPrintln("[", rf.me, "]", "Election paused for ", rr.Int64())
-		time.Sleep((200 + time.Duration(rr.Int64())) * time.Millisecond)
-
+		time.Sleep(rf.ElectionTimeOut())
 	}
+}
+
+func (rf *Raft) ElectionTimeOut() time.Duration {
+	tt, _ := crand.Int(crand.Reader, big.NewInt(180))
+	r := 280 + int(tt.Int64())
+	tm := time.Duration(int(r)) * time.Millisecond
+	return tm
 }
 
 //if communication is not received for LastRpcTimeOut calls for an election
 func (rf *Raft) CheckAndKickOfLeaderElection() {
 	for {
-		max := big.NewInt(200)
-		rr, _ := crand.Int(crand.Reader, max)
-		time.Sleep(time.Duration(rr.Int64()) * time.Millisecond)
 
 		rf.mu.Lock()
 		if rf.killed() {
@@ -172,14 +206,14 @@ func (rf *Raft) CheckAndKickOfLeaderElection() {
 			return
 		}
 
-		timeOutAt := rf.lastRpcReceived.Add(LastRpcTimeOut)
+		timeOutAt := rf.lastRpcReceived.Add(rf.ElectionTimeOut())
 		if time.Now().After(timeOutAt) {
 			rf.currentState = CANDIDATE
 			go rf.StartElectionProcess()
 
 			rf.mu.Unlock()
 			// let the election happen
-			time.Sleep(1000 * time.Millisecond)
+			time.Sleep(rf.ElectionTimeOut())
 
 		} else {
 			rf.mu.Unlock()
