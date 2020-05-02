@@ -40,9 +40,6 @@ func (rf *Raft) CandidateIsUptoDate(args *RequestVoteArgs) bool {
 func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	// DPrintln("[", rf.me, "]", "*********RequestVote received from", args.CandidateId, "by ", rf.me)
-
-	// DPrintln("[", rf.me, "]", "args.Term => ", args.Term, "term =>", rf.currentTerm, "rf.votedFor =>", rf.votedFor, "args.LastLogIndex => ", args.LastLogIndex, "rf.commitIndex =>", rf.commitIndex)
 
 	if args.Term < rf.currentTerm {
 		reply.VoteGranted = false
@@ -54,7 +51,6 @@ func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 		rf.MakeFollower()
 		rf.votedFor = args.CandidateId
 		reply.Term = rf.currentTerm
-		// DPrintln("[", rf.me, "]", rf.me, " Voting for ", args.CandidateId)
 	} else {
 		if args.Term > rf.currentTerm {
 			rf.ResetRpcTimer()
@@ -63,7 +59,6 @@ func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.votedFor = -1
 		}
 	}
-	// DPrintln("[", rf.me, "]", "*********RequestVote Sent for", args.CandidateId, "by ", rf.me, "=>", reply)
 }
 
 func (rf *Raft) MakeLeader() {
@@ -87,7 +82,6 @@ func (rf *Raft) ConductElection() {
 	}
 	rf.ResetRpcTimer()
 	rf.IncTerm()
-	// DPrintln("[", rf.me, "]", "Election started by %d", rf.me, "for term =>", rf.currentTerm)
 	rf.currentState = CANDIDATE
 	rf.votedFor = rf.me
 
@@ -122,7 +116,7 @@ func (rf *Raft) ConductElection() {
 	}
 
 	rf.mu.Unlock()
-	// DPrintln("[", rf.me, "]", "Counting votes for ", rf.me, "Replies count", repliesCount, "peers => ", len(rf.peers)/2)
+
 	sleeps := 0
 	for {
 		if sleeps > 20 {
@@ -150,8 +144,6 @@ func (rf *Raft) ConductElection() {
 					rf.currentTerm = reply.Term
 					rf.votedFor = -1
 					rf.rfCond.Broadcast()
-					rf.mu.Unlock()
-					return
 				} else {
 					if reply.VoteGranted {
 						votes += 1
@@ -160,7 +152,6 @@ func (rf *Raft) ConductElection() {
 			}
 			if votes > rf.Majority() {
 				rf.MakeLeader()
-				// fmt.Println("[", rf.me, ",", rf.currentTerm, "]", "LEADER is here....", rf.me)
 				rf.rfCond.Broadcast()
 			}
 		}

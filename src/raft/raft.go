@@ -1,21 +1,5 @@
 package raft
 
-//
-// this is an outline of the API that raft must expose to
-// the service (or tester). see comments below for
-// each of these functions for more details.
-//
-// rf = Make(...)
-//   create a new Raft server.
-// rf.Start(command interface{}) (index, term, isleader)
-//   start agreement on a new log entry
-// rf.GetState() (term, isLeader)
-//   ask a Raft for its current term, and whether it thinks it is leader
-// ApplyMsg
-//   each time a new entry is committed to the log, each Raft peer
-//   should send an ApplyMsg to the service (or tester)
-//   in the same server.
-//
 
 import "sync"
 import "sync/atomic"
@@ -81,13 +65,10 @@ type Raft struct {
 	rfCond          *sync.Cond
 }
 
-// return currentTerm and whether this server
-// believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	// DPrintln("[", rf.me, "]", "GetState from", rf.me, "=> ", rf.currentTerm, rf.currentState == LEADER)
 	return rf.currentTerm, rf.currentState == LEADER
 }
 
@@ -152,16 +133,14 @@ type AppendEntriesReply struct {
 }
 
 type RequestVoteArgs struct {
-	// Your data here (2A, 2B).
-	Term         int //Candidates term
+	Term         int
 	CandidateId  int
 	LastLogIndex int
 	LastLogTerm  int
 }
 
 type RequestVoteReply struct {
-	// Your data here (2A).
-	Term        int //current Term for candidate to update itself
+	Term        int
 	VoteGranted bool
 }
 
@@ -179,20 +158,6 @@ func (rf *Raft) LastLog() Log {
 	return rf.log[len(rf.log)-1]
 }
 
-//
-// the service using Raft (e.g. a k/v server) wants to start
-// agreement on the next command to be appended to Raft's log. if this
-// server isn't the leader, returns false. otherwise start the
-// agreement and return immediately. there is no guarantee that this
-// command will ever be committed to the Raft log, since the leader
-// may fail or lose an election. even if the Raft instance has been killed,
-// this function should return gracefully.
-//
-// the first return value is the index that the command will appear at
-// if it's ever committed. the second return value is the current
-// term. the third return value is true if this server believes it is
-// the leader.
-//
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -215,7 +180,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	lastLog := rf.LastLog()
 	rf.log = append(rf.log, entries...)
 
-	// fmt.Println("[", rf.me, "]", "Start called with =>", entries)
 	go rf.SendAppendEntries(entries, lastLog)
 
 	return log.Index, log.Term, isLeader
@@ -228,22 +192,10 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) killed() bool {
-	// DPrintln("[", rf.me, "]", "Killed called....")
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
 
-//
-// the service or tester wants to create a Raft server. the ports
-// of all the Raft servers (including this one) are in peers[]. this
-// server's port is peers[me]. all the servers' peers[] arrays
-// have the same order. persister is a place for this server to
-// save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
-// tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
-// for any long-running work.
-//
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}

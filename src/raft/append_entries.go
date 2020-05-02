@@ -105,7 +105,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
-	// DPrintln("[", rf.me, ", ", rf.currentTerm,"]", "AppendEntries received from ", args.LeaderId, "by ", rf.me, "args.term => ", args.Term, "rf.currentTerm => ", rf.currentTerm)
 	if rf.killed() {
 		return
 	}
@@ -122,7 +121,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//1
 	if args.Term < rf.currentTerm {
 		reply.Success = false
-		// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "1 breaks")
 		return
 	}
 
@@ -139,11 +137,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 				break
 			}
 		}
-		// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "2 breaks", len(rf.log), args.PrevLogTerm)
 		return
 	}
-
-	// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "Logs Before => ", rf.log, "Entries => ", args.Entries)
 
 	//3
 	for _, entry := range args.Entries {
@@ -187,8 +182,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 	rf.rfCond.Broadcast()
-	// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "Logs After => ", rf.log)
-	// fmt.Println()
 }
 
 func (rf *Raft) SendHeartBeats() {
@@ -204,7 +197,6 @@ func (rf *Raft) SendHeartBeats() {
 
 		rf.ResetRpcTimer()
 
-		DPrintln("[", rf.me, ", ", rf.currentTerm, "]", "Sending SendHeartBeats")
 		go rf.SendAppendEntries([]Log{}, rf.LastLog())
 
 		lastMajority := 0
