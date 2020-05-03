@@ -222,6 +222,6 @@ func (rf *Raft) SendHeartBeats() {
 
 
 		rf.mu.Unlock()
-		time.Sleep(230 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
 }
