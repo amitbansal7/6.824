@@ -181,7 +181,7 @@ func (rf *Raft) StartElectionProcess() {
 }
 
 func (rf *Raft) ElectionTimeOut() time.Duration {
-	tt, _ := crand.Int(crand.Reader, big.NewInt(220))
+	tt, _ := crand.Int(crand.Reader, big.NewInt(180))
 	r := 280 + int(tt.Int64())
 	tm := time.Duration(int(r)) * time.Millisecond
 	return tm
