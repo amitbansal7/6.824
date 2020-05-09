@@ -76,7 +76,7 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			}
 			*successCount = *successCount + 1
 
-			if !*isCommited && *successCount > rf.Majority() && rf.log[commitTillIndex].Term == rf.currentTerm {
+			if !*isCommited && *successCount > rf.Majority() && commitTillIndex < len(rf.log) && rf.log[commitTillIndex].Term == rf.currentTerm {
 				rf.commitIndex = commitTillIndex
 				*isCommited = true
 				rf.rfCond.Broadcast()
