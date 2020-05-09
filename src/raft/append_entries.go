@@ -87,6 +87,7 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			if reply.Term > rf.currentTerm {
 				rf.currentTerm = reply.Term
 				rf.MakeFollower()
+				// rf.persist()
 				rf.mu.Unlock()
 				return
 			} else {
@@ -182,6 +183,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		}
 	}
 	rf.rfCond.Broadcast()
+	rf.persist()
 }
 
 func (rf *Raft) SendHeartBeats() {
@@ -220,8 +222,7 @@ func (rf *Raft) SendHeartBeats() {
 			rf.rfCond.Broadcast()
 		}
 
-
 		rf.mu.Unlock()
-		time.Sleep(230 * time.Millisecond)
+		time.Sleep(280 * time.Millisecond)
 	}
 }

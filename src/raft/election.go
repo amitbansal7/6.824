@@ -59,6 +59,7 @@ func (rf *Raft) RequestVoteRpc(args *RequestVoteArgs, reply *RequestVoteReply) {
 			rf.votedFor = -1
 		}
 	}
+	rf.persist()
 }
 
 func (rf *Raft) MakeLeader() {
@@ -84,7 +85,6 @@ func (rf *Raft) ConductElection() {
 	rf.IncTerm()
 	rf.currentState = CANDIDATE
 	rf.votedFor = rf.me
-
 	requestVoteReplyMp := make(map[int]*RequestVoteReply)
 
 	requestVoteReplyMp[rf.me] = &RequestVoteReply{
@@ -119,7 +119,7 @@ func (rf *Raft) ConductElection() {
 
 	sleeps := 0
 	for {
-		if sleeps > 20 {
+		if sleeps > 10 {
 			return
 		}
 		rf.mu.Lock()
@@ -157,6 +157,7 @@ func (rf *Raft) ConductElection() {
 		}
 		rf.mu.Unlock()
 	}
+	// rf.persist()
 }
 
 func (rf *Raft) StartElectionProcess() {
@@ -181,7 +182,7 @@ func (rf *Raft) StartElectionProcess() {
 }
 
 func (rf *Raft) ElectionTimeOut() time.Duration {
-	tt, _ := crand.Int(crand.Reader, big.NewInt(180))
+	tt, _ := crand.Int(crand.Reader, big.NewInt(220))
 	r := 280 + int(tt.Int64())
 	tm := time.Duration(int(r)) * time.Millisecond
 	return tm
