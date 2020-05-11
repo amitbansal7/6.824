@@ -1,12 +1,8 @@
 package raft
 
 import "../labrpc"
-
 import "time"
-
-// import "fmt"
-
-// import "sort"
+import "fmt"
 
 // import crand "crypto/rand"
 // import "math/big"
@@ -41,7 +37,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 	entries := make([]Log, len(rf.log[rf.nextIndex[i]:]))
 	copy(entries, rf.log[rf.nextIndex[i]:])
 
-
 	reply := &AppendEntriesReply{}
 	args := &AppendEntriesArgs{
 		Term:         rf.currentTerm,
@@ -69,8 +64,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			rf.nextIndex[i] = args.Entries[len(args.Entries)-1].Index + 1
 		}
 		rf.matchIndex[i] = commitTillIndex
-		// rf.matchIndex[i] = args.PrevLogIndex + len(args.Entries)
-		// rf.nextIndex[i] = rf.matchIndex[i] + 1
 
 		if rf.nextIndex[i] > len(rf.log) {
 			rf.nextIndex[i] = len(rf.log)
@@ -100,6 +93,11 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			rf.mu.Unlock()
 			return
 		} else {
+
+			for rf.log[reply.NextIndex].Term == args.PrevLogTerm {
+				reply.NextIndex -= 1
+			}
+
 			rf.nextIndex[i] = reply.NextIndex
 			if rf.nextIndex[i] < 1 {
 				rf.nextIndex[i] = 1
@@ -154,8 +152,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		for i := len(rf.log) - 1; i >= 0; i-- {
 			if entry.Index == rf.log[i].Index && entry.Term != rf.log[i].Term {
 				rf.log = append(rf.log[:i])
-				reply.NextIndex = i;
-				return
+				break
 			}
 		}
 	}
@@ -176,10 +173,10 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//5
 	lastEntry := rf.LastLog()
 
-	// if lastEntry.Index != len(rf.log)-1 {
-	// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "index and .Index mismatch....!!!!!!!!")
-	// fmt.Println(lastEntry, rf.log, args.Entries)
-	// }
+	if lastEntry.Index != len(rf.log)-1 {
+		fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "index and .Index mismatch....!!!!!!!!")
+		fmt.Println(lastEntry, len(rf.log)-1)
+	}
 
 	if args.LeaderCommit > rf.commitIndex {
 		if args.LeaderCommit < lastEntry.Index {

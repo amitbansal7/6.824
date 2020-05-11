@@ -32,7 +32,6 @@ func (rf *Raft) CandidateIsUptoDate(args *RequestVoteArgs) bool {
 	if args.LastLogTerm != lastLog.Term {
 		return args.LastLogTerm > lastLog.Term
 	} else {
-		//TODO make sure this is correct.
 		return args.LastLogIndex+1 >= len(rf.log)
 	}
 }
