@@ -157,7 +157,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//4
 	for _, entry := range args.Entries {
 		found := false
-		for i := len(rf.log) - 1; i >= 0; i-- {
+		for i := len(rf.log) - 1; i >=g 0; i-- {
 			if entry.Index == rf.log[i].Index && entry.Term == rf.log[i].Term {
 				found = true
 			}
