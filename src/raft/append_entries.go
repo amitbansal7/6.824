@@ -174,7 +174,8 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		for i := len(rf.log) - 1; i >= 0; i-- {
 			if entry.Index == rf.log[i].Index && entry.Term != rf.log[i].Term {
 				rf.log = append(rf.log[:i])
-				break
+				reply.NextIndex = i;
+				return
 			}
 		}
 	}
@@ -194,9 +195,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	//5
 	lastEntry := rf.LastLog()
-	if len(args.Entries) > 0 {
-		lastEntry = args.Entries[len(args.Entries)-1]
-	}
 
 	// if lastEntry.Index != len(rf.log)-1 {
 	// fmt.Println("[", rf.me, ", ", rf.currentTerm, "]", "index and .Index mismatch....!!!!!!!!")
