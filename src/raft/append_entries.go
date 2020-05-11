@@ -95,7 +95,7 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 		} else {
 
 			reply.NextIndex = max(1, reply.NextIndex)
-			for rf.log[reply.NextIndex].Term == args.PrevLogTerm {
+			for reply.NextIndex > 1 && rf.log[reply.NextIndex].Term == args.PrevLogTerm {
 				reply.NextIndex -= 1
 			}
 
@@ -198,6 +198,6 @@ func (rf *Raft) SendHeartBeats() {
 		go rf.SendAppendEntries()
 
 		rf.mu.Unlock()
-		time.Sleep(110 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
