@@ -34,15 +34,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 		return
 	}
 
-	// nextIdx := rf.nextIndex[i]
-	// for idx := len(rf.log) - 1; idx > 0; idx-- {
-	// 	if rf.log[idx].Index == rf.nextIndex[i] {
-	// 		nextIdx = idx
-	// 		break
-	// 	}
-	// }
-
-	// lastLog = &rf.log[nextIdx-1]
 	lastLog := &rf.log[rf.nextIndex[i]-1]
 	prevLogIndex := (*lastLog).Index
 	prevLogTerm := (*lastLog).Term
@@ -50,8 +41,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 	entries := make([]Log, len(rf.log[rf.nextIndex[i]:]))
 	copy(entries, rf.log[rf.nextIndex[i]:])
 
-	// entries := make([]Log, len(rf.log[(prevLogIndex+1):]))
-	// copy(entries, rf.log[(prevLogIndex+1):])
 
 	reply := &AppendEntriesReply{}
 	args := &AppendEntriesArgs{
@@ -88,7 +77,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 		}
 
 		for N := len(rf.log) - 1; N > rf.commitIndex; N-- {
-			// n := rf.log[N].Index
 			count := 0
 			for _, index := range rf.matchIndex {
 				if index >= N {
@@ -97,14 +85,6 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			}
 			if count > rf.Majority() {
 				rf.commitIndex = N
-
-				// for idx := len(rf.log) - 1; i > 0; i-- {
-				// if rf.log[idx].Index == n {
-				// rf.commitIndex = idx
-				// break
-				// }
-				// }
-
 				rf.rfCond.Broadcast()
 				break
 			}
@@ -116,7 +96,7 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 		if reply.Term > rf.currentTerm {
 			rf.currentTerm = reply.Term
 			rf.MakeFollower()
-			// rf.persist()
+			rf.persist()
 			rf.mu.Unlock()
 			return
 		} else {
