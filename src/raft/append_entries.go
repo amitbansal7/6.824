@@ -94,15 +94,12 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 			return
 		} else {
 
+			reply.NextIndex = max(1, reply.NextIndex)
 			for rf.log[reply.NextIndex].Term == args.PrevLogTerm {
 				reply.NextIndex -= 1
 			}
 
-			rf.nextIndex[i] = reply.NextIndex
-			if rf.nextIndex[i] < 1 {
-				rf.nextIndex[i] = 1
-				// fmt.Println("Next Index is < 1 for =>", i)
-			}
+			rf.nextIndex[i] = max(1, reply.NextIndex)
 		}
 	}
 	rf.mu.Unlock()
@@ -160,7 +157,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	//4
 	for _, entry := range args.Entries {
 		found := false
-		for i := len(rf.log) - 1; i >= 0; i-- {
+		for i := len(rf.log) - 1; i >=g 0; i-- {
 			if entry.Index == rf.log[i].Index && entry.Term == rf.log[i].Term {
 				found = true
 			}
@@ -179,11 +176,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	if args.LeaderCommit > rf.commitIndex {
-		if args.LeaderCommit < lastEntry.Index {
-			rf.commitIndex = args.LeaderCommit
-		} else {
-			rf.commitIndex = lastEntry.Index
-		}
+		rf.commitIndex = min(args.LeaderCommit, lastEntry.Index)
 	}
 	rf.rfCond.Broadcast()
 	rf.persist()
