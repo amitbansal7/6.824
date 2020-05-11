@@ -95,7 +95,7 @@ func (rf *Raft) AppendEntriesSyncForClientEnd(i int, clientEnd *labrpc.ClientEnd
 		} else {
 
 			reply.NextIndex = max(1, reply.NextIndex)
-			for rf.log[reply.NextIndex].Term == args.PrevLogTerm {
+			for reply.NextIndex > 0 && rf.log[reply.NextIndex].Term == args.PrevLogTerm {
 				reply.NextIndex -= 1
 			}
 
