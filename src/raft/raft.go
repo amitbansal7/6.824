@@ -19,17 +19,6 @@ const (
 	CANDIDATE      = 2
 )
 
-//
-// as each Raft peer becomes aware that successive log entries are
-// committed, the peer should send an ApplyMsg to the service (or
-// tester) on the same server, via the applyCh passed to Make(). set
-// CommandValid to true to indicate that the ApplyMsg contains a newly
-// committed log entry.
-//
-// in Lab 3 you'll want to send other kinds of messages (e.g.,
-// snapshots) on the applyCh; at that point you can add fields to
-// ApplyMsg, but set CommandValid to false for these other uses.
-//
 type ApplyMsg struct {
 	CommandValid bool
 	Command      interface{}
@@ -100,11 +89,8 @@ func (rf *Raft) persist() {
 	rf.persister.SaveRaftState(data)
 }
 
-//
-// restore previously persisted state.
-//
 func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
+	if data == nil || len(data) < 1 {
 		return
 	}
 
@@ -182,10 +168,13 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 	entries := []Log{log}
 
-	lastLog := rf.LastLog()
 	rf.log = append(rf.log, entries...)
 	rf.persist()
-	go rf.SendAppendEntries(entries, lastLog)
+
+	rf.matchIndex[rf.me] = log.Index
+	rf.nextIndex[rf.me] = log.Index + 1
+
+	go rf.SendAppendEntries()
 
 	return log.Index, log.Term, isLeader
 }
