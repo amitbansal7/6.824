@@ -67,43 +67,43 @@
 ### Lab 2:
 
 ```
-λ go test -race -run 2
+λ go test -run 2
 Test (2A): initial election ...
-  ... Passed --   3.0  3   52   14112    0
+  ... Passed --   3.1  3   54   14664    0
 Test (2A): election after network failure ...
-  ... Passed --   5.7  3  150   30200    0
+  ... Passed --   6.1  3  158   31116    0
 Test (2B): basic agreement ...
-  ... Passed --   0.7  3   16    4310    3
+  ... Passed --   0.7  3   16    4342    3
 Test (2B): RPC byte count ...
-  ... Passed --   1.6  3   50  114104   11
+  ... Passed --   1.4  3   48  113794   11
 Test (2B): agreement despite follower disconnection ...
-  ... Passed --   4.1  3   90   23506    7
+  ... Passed --   4.3  3   92   23702    7
 Test (2B): no agreement if too many followers disconnect ...
-  ... Passed --   3.5  5  248   47552    3
+  ... Passed --   3.6  5  244   47054    3
 Test (2B): concurrent Start()s ...
-  ... Passed --   0.5  3   16    4751    6
+  ... Passed --   0.5  3   18    5397    6
 Test (2B): rejoin of partitioned leader ...
-  ... Passed --   6.9  3  186   43905    4
+  ... Passed --   7.6  3  202   47910    4
 Test (2B): leader backs up quickly over incorrect follower logs ...
-  ... Passed --  20.0  5 2672 1968137  102
+  ... Passed --  17.2  5 2256 1808318  102
 Test (2B): RPC counts aren't too high ...
-  ... Passed --   2.1  3   62   19097   12
+  ... Passed --   2.0  3   58   18036   12
 Test (2C): basic persistence ...
-  ... Passed --   4.9  3   92   22570    6
+  ... Passed --   4.3  3   84   21466    6
 Test (2C): more persistence ...
-  ... Passed --  20.4  5 1280  246186   16
+  ... Passed --  24.9  5 1572  298943   16
 Test (2C): partitioned leader and one follower crash, leader restarts ...
-  ... Passed --   2.2  3   36    8789    4
+  ... Passed --   2.6  3   40    9663    4
 Test (2C): Figure 8 ...
-  ... Passed --  31.0  5  560   98310   14
+  ... Passed --  24.9  5  476   90866   19
 Test (2C): unreliable agreement ...
-  ... Passed --   2.1  5 1056  373678  246
+  ... Passed --   1.5  5 1036  364042  246
 Test (2C): Figure 8 (unreliable) ...
-  ... Passed --  41.4  5 9742 22892640   37
+  ... Passed --  31.6  5 10764 41995661  411
 Test (2C): churn ...
-  ... Passed --  16.5  5 4056 1933022  761
+  ... Passed --  16.1  5 14986 70869004 2684
 Test (2C): unreliable churn ...
-  ... Passed --  16.5  5 2776 4165010  518
+  ... Passed --  16.1  5 5112 5402667 1102
 PASS
-ok    6.824/src/raft  183.924s
+ok    6.824/src/raft  168.701s
 ```
