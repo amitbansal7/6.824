@@ -1,7 +1,5 @@
 package raft
 
-import "time"
-
 type AppendEntriesArgs struct {
 	Term     int
 	LeaderId int
@@ -23,17 +21,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Term = rf.currentTerm
 	reply.Success = true
 	rf.mu.Unlock()
-}
-
-func (rf *Raft) AppendEntriesTicker() {
-	for !rf.killed() {
-		rf.mu.Lock()
-		if rf.currentState == LEADER {
-			rf.SendAppendEntries()
-		}
-		rf.mu.Unlock()
-		time.Sleep(time.Millisecond * 100)
-	}
 }
 
 func (rf *Raft) SendAppendEntries() {

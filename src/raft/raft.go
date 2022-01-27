@@ -167,7 +167,7 @@ func (rf *Raft) killed() bool {
 
 func (rf *Raft) ElectionTimeout() time.Duration {
 	tt, _ := crand.Int(crand.Reader, big.NewInt(150))
-	r := 150 + int(tt.Int64())
+	r := 200 + int(tt.Int64())
 	tm := time.Duration(int(r)) * time.Millisecond
 	return tm
 }
@@ -189,17 +189,17 @@ func (rf *Raft) ticker() {
 	}
 }
 
-//
-// the service or tester wants to create a Raft server. the ports
-// of all the Raft servers (including this one) are in peers[]. this
-// server's port is peers[me]. all the servers' peers[] arrays
-// have the same order. persister is a place for this server to
-// save its persistent state, and also initially holds the most
-// recent saved state, if any. applyCh is a channel on which the
-// tester or service expects Raft to send ApplyMsg messages.
-// Make() must return quickly, so it should start goroutines
-// for any long-running work.
-//
+func (rf *Raft) AppendEntriesTicker() {
+	for !rf.killed() {
+		rf.mu.Lock()
+		if rf.currentState == LEADER {
+			rf.SendAppendEntries()
+		}
+		rf.mu.Unlock()
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	rf := &Raft{}
