@@ -194,6 +194,9 @@ func (rf *Raft) AppendEntriesTicker() {
 		rf.mu.Lock()
 		if rf.currentState == LEADER {
 			rf.SendAppendEntries()
+		} else {
+			rf.mu.Unlock()
+			return
 		}
 		rf.mu.Unlock()
 		time.Sleep(time.Millisecond * 100)
