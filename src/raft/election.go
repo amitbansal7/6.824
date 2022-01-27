@@ -67,6 +67,7 @@ func (rf *Raft) ConductElection() {
 			votes += 1
 			if votes >= ((len(rf.peers) / 2) + 1) {
 				rf.MakeLeader(electionTerm)
+				return
 			}
 		}
 	}
