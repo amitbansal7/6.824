@@ -24,16 +24,22 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) SendAppendEntries() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
 	rf.ResetRpcTimer()
 	for id := range rf.peers {
 		if id != rf.me {
-			go func(peer int, term int, leaderId int) {
-				args := &AppendEntriesArgs{Term: term, LeaderId: leaderId}
-				reply := &AppendEntriesReply{}
-				rf.peers[peer].Call("Raft.AppendEntries", args, reply)
-
-				// DPrintf("[%d] Sending append to [%d] response", rf.me, id)
-			}(id, rf.currentTerm, rf.me)
+			go rf.SendAppendEntriesToPeer(id)
 		}
 	}
+}
+
+func (rf *Raft) SendAppendEntriesToPeer(peer int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	args := &AppendEntriesArgs{Term: rf.currentTerm, LeaderId: rf.me}
+	reply := &AppendEntriesReply{}
+	go rf.peers[peer].Call("Raft.AppendEntries", args, reply)
 }

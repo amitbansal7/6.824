@@ -193,12 +193,12 @@ func (rf *Raft) AppendEntriesTicker() {
 	for !rf.killed() {
 		rf.mu.Lock()
 		if rf.currentState == LEADER {
+			rf.mu.Unlock()
 			rf.SendAppendEntries()
 		} else {
 			rf.mu.Unlock()
-			return
 		}
-		rf.mu.Unlock()
+
 		time.Sleep(time.Millisecond * 100)
 	}
 }

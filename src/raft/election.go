@@ -78,7 +78,7 @@ func (rf *Raft) MakeLeader(electionTerm int) {
 	defer rf.mu.Unlock()
 	if !rf.killed() && rf.currentTerm == electionTerm && rf.currentState == CANDIDATE {
 		rf.currentState = LEADER
-		go rf.AppendEntriesTicker()
+		go rf.SendAppendEntries()
 		DPrintf("[%d][%d] Leader is here", rf.me, rf.currentTerm)
 	}
 }
